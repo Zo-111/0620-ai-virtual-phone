@@ -67,10 +67,13 @@ export async function POST(request: Request) {
         }
 
         if (voices.length === 0) {
-            return NextResponse.json({
-                error: "未拉取到音色模型，请检查 API Key 是否有效，或在 Fish Audio 官网创建/收藏音色。",
-                voices: [],
-            }, { status: 404 });
+            voices.push(
+                { id: "7f92f8afb8ec43bf81429cc1c9199cb1", name: "丁真 (示例推荐)" },
+                { id: "54a511d819fb458d8e573e0a17406691", name: "雷电将军 (原神)" },
+                { id: "e10228de3e49454199990b7936a29ab8", name: "派蒙 (原神)" },
+                { id: "d69a5fb2ff5543c1a3eb899b823b1859", name: "纳西妲 (原神)" },
+                { id: "8f7236e7293a40879f90f6e52c8b82ff", name: "温柔邻家姐姐" }
+            );
         }
 
         return NextResponse.json({ voices });
