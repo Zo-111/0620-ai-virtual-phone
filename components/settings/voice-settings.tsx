@@ -514,7 +514,34 @@ export function VoiceSettings() {
             } else if (config.provider === "OpenAI") {
                 setFetchedVoices(prev => ({ ...prev, [config.id]: DEFAULT_OPENAI_VOICES }));
             } else if (config.provider === "FishAudio") {
-                setFetchError(prev => ({ ...prev, [config.id]: "Fish Audio 请直接填入音色 Reference ID" }));
+                if (!config.apiKey.trim()) {
+                    setFetchError(prev => ({ ...prev, [config.id]: "请先填写 API Key" }));
+                    return;
+                }
+                const response = await fetch("/api/voice/fish-voices", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        apiKey: config.apiKey,
+                        baseUrl: config.baseUrl || "https://api.fish.audio",
+                    }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `拉取失败 (${response.status})`);
+                }
+                const voiceList = Array.isArray(data.voices) ? data.voices as VoiceOption[] : [];
+                if (voiceList.length > 0) {
+                    const nextCustomVoices = uniqueOptions([...voiceList, ...(config.customVoices || [])]);
+                    updateConfig(config.id, {
+                        customVoices: nextCustomVoices,
+                        ...(config.defaultVoice ? {} : { defaultVoice: voiceList[0].id }),
+                    });
+                    setFetchedVoices(prev => ({ ...prev, [config.id]: nextCustomVoices }));
+                    setManualVoiceIds(prev => ({ ...prev, [config.id]: false }));
+                } else {
+                    throw new Error("未找到可用音色");
+                }
             } else {
                 throw new Error("该服务商暂不支持拉取模型列表");
             }
@@ -892,17 +919,15 @@ export function VoiceSettings() {
                                                                 placeholder={config.provider === "FishAudio" ? "输入音色 Reference ID..." : config.provider === "OpenAI" ? "alloy" : "male-qn-qingse 或克隆 Voice ID"}
                                                                 className="flex-1"
                                                             />
-                                                            {config.provider !== "FishAudio" && (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setManualVoiceIds(prev => ({ ...prev, [config.id]: false }))}
-                                                                    className="ui-icon-btn"
-                                                                    aria-label="返回音色下拉选择"
-                                                                    title="返回音色下拉选择"
-                                                                >
-                                                                    <List size={20} />
-                                                                </button>
-                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setManualVoiceIds(prev => ({ ...prev, [config.id]: false }))}
+                                                                className="ui-icon-btn"
+                                                                aria-label="返回音色下拉选择"
+                                                                title="返回音色下拉选择"
+                                                            >
+                                                                <List size={20} />
+                                                            </button>
                                                         </>
                                                     ) : (
                                                         (() => {
@@ -936,28 +961,26 @@ export function VoiceSettings() {
                                                     </button>
                                                 </div>
 
-                                                {config.provider !== "FishAudio" && (
-                                                    <div className="flex gap-2 mt-0.5">
+                                                <div className="flex gap-2 mt-0.5">
+                                                    <button
+                                                        onClick={() => fetchVoices(config)}
+                                                        disabled={isFetching[config.id]}
+                                                        className="ui-btn ui-btn ui-btn-soft-action w-full"
+                                                    >
+                                                        <RefreshCw size={16} className={isFetching[config.id] ? "animate-spin" : ""} />
+                                                        {isFetching[config.id] ? "同步中..." : config.provider === "OpenAI" ? "显示默认音色" : "同步音色列表"}
+                                                    </button>
+                                                    {config.provider === "Minimax" && (
                                                         <button
-                                                            onClick={() => fetchVoices(config)}
-                                                            disabled={isFetching[config.id]}
-                                                            className="ui-btn ui-btn ui-btn-soft-action w-full"
+                                                            onClick={() => openCloneModal(config)}
+                                                            disabled={!config.apiKey.trim()}
+                                                            className="ui-btn ui-btn-soft-action w-full"
                                                         >
-                                                            <RefreshCw size={16} className={isFetching[config.id] ? "animate-spin" : ""} />
-                                                            {isFetching[config.id] ? "同步中..." : config.provider === "Minimax" ? "同步音色列表" : "显示默认音色"}
+                                                            <Upload size={16} />
+                                                            上传音频克隆音色
                                                         </button>
-                                                        {config.provider === "Minimax" && (
-                                                            <button
-                                                                onClick={() => openCloneModal(config)}
-                                                                disabled={!config.apiKey.trim()}
-                                                                className="ui-btn ui-btn-soft-action w-full"
-                                                            >
-                                                                <Upload size={16} />
-                                                                上传音频克隆音色
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                )}
+                                                    )}
+                                                </div>
 
                                                 {fetchError[config.id] && (
                                                     <Alert variant="danger">
