@@ -43,6 +43,10 @@ export async function synthesizeSpeech(
         return synthesizeOpenAI(text, voiceConfig);
     }
 
+    if (provider === "FishAudio") {
+        return synthesizeFishAudio(text, voiceConfig);
+    }
+
     return null;
 }
 
@@ -168,6 +172,43 @@ async function synthesizeOpenAI(text: string, config: VoiceApiConfig): Promise<B
     if (!response.ok) {
         const errText = await response.text().catch(() => "");
         throw new Error(`OpenAI TTS 请求失败 (${response.status}): ${errText}`);
+    }
+
+    const blob = await response.blob();
+    return new Blob([await blob.arrayBuffer()], { type: "audio/mpeg" });
+}
+
+// ── Fish Audio TTS ──────────────────────────────────
+
+async function synthesizeFishAudio(text: string, config: VoiceApiConfig): Promise<Blob | null> {
+    if (!config.apiKey) throw new Error("Fish Audio API Key 未配置");
+
+    const baseUrl = (config.baseUrl || "https://api.fish.audio/v1").replace(/\/$/, "");
+    const bodyPayload: Record<string, unknown> = {
+        text,
+        format: "mp3",
+    };
+    if (config.defaultVoice?.trim()) {
+        bodyPayload.reference_id = config.defaultVoice.trim();
+    }
+
+    const headers: Record<string, string> = {
+        Authorization: `Bearer ${config.apiKey.trim()}`,
+        "Content-Type": "application/json",
+    };
+    if (config.model?.trim()) {
+        headers["model"] = config.model.trim();
+    }
+
+    const response = await fetchWithTimeout(`${baseUrl}/tts`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(bodyPayload),
+    });
+
+    if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        throw new Error(`Fish Audio TTS 请求失败 (${response.status}): ${errText}`);
     }
 
     const blob = await response.blob();
