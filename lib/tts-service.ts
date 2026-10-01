@@ -183,32 +183,23 @@ async function synthesizeOpenAI(text: string, config: VoiceApiConfig): Promise<B
 async function synthesizeFishAudio(text: string, config: VoiceApiConfig): Promise<Blob | null> {
     if (!config.apiKey) throw new Error("Fish Audio API Key 未配置");
 
-    const baseUrl = (config.baseUrl || "https://api.fish.audio/v1").replace(/\/$/, "");
-    const bodyPayload: Record<string, unknown> = {
-        text,
-        format: "mp3",
-    };
-    if (config.defaultVoice?.trim()) {
-        bodyPayload.reference_id = config.defaultVoice.trim();
-    }
-
-    const headers: Record<string, string> = {
-        Authorization: `Bearer ${config.apiKey.trim()}`,
-        "Content-Type": "application/json",
-    };
-    if (config.model?.trim()) {
-        headers["model"] = config.model.trim();
-    }
-
-    const response = await fetchWithTimeout(`${baseUrl}/tts`, {
+    const response = await fetchWithTimeout("/api/voice/fish-audio", {
         method: "POST",
-        headers,
-        body: JSON.stringify(bodyPayload),
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            apiKey: config.apiKey.trim(),
+            baseUrl: config.baseUrl,
+            text,
+            reference_id: config.defaultVoice?.trim(),
+            model: config.model?.trim(),
+        }),
     });
 
     if (!response.ok) {
-        const errText = await response.text().catch(() => "");
-        throw new Error(`Fish Audio TTS 请求失败 (${response.status}): ${errText}`);
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Fish Audio 请求失败 (${response.status})`);
     }
 
     const blob = await response.blob();
