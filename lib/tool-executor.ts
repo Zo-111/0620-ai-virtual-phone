@@ -23,12 +23,13 @@ import {
 } from "./tool-storage";
 import { executeCustomAppToolCall } from "./custom-app-tool-runtime";
 import { characterWorkspace, agentComputerRequest, isAgentComputerConfigured } from "./agent-computer";
-import { AGENT_COMPUTER_CAPABILITY_ID, CALENDAR_MANAGEMENT_CAPABILITY_ID, LOCAL_DATA_LIBRARY_CAPABILITY_ID, MEMORY_WRITE_CAPABILITY_ID, MUSIC_CONTROL_CAPABILITY_ID, NOTE_WALL_CAPABILITY_ID, REALITY_BRIDGE_CAPABILITY_ID, SEND_FILE_CAPABILITY_ID, TIMED_WAKE_CAPABILITY_ID, TOOLBOX_MANAGEMENT_CAPABILITY_ID, getInternalCapability } from "./internal-capability-storage";
+import { AGENT_COMPUTER_CAPABILITY_ID, AVATAR_MANAGEMENT_CAPABILITY_ID, CALENDAR_MANAGEMENT_CAPABILITY_ID, LOCAL_DATA_LIBRARY_CAPABILITY_ID, MEMORY_WRITE_CAPABILITY_ID, MUSIC_CONTROL_CAPABILITY_ID, NOTE_WALL_CAPABILITY_ID, REALITY_BRIDGE_CAPABILITY_ID, SEND_FILE_CAPABILITY_ID, TIMED_WAKE_CAPABILITY_ID, TOOLBOX_MANAGEMENT_CAPABILITY_ID, getInternalCapability } from "./internal-capability-storage";
 import { bridgeConnection, loadBridgeDataItems, loadBridgeShortcutActions, readAllBridgeStateSnapshots, readBridgeStateSnapshot } from "./reality-bridge/storage";
 import { createShortcutCommand, deliverShortcutCommand, waitForShortcutCommand } from "./shortcut-command-client";
 import { loadMemoryEntriesByType, saveMemoryEntry } from "./memory-storage";
 import type { MemoryEntry } from "./memory-types";
-import { loadCharacters } from "./character-storage";
+import { loadCharacters, saveCharacters } from "./character-storage";
+import { chatDb } from "./chat-db";
 import {
     deleteCalendarScheduleItem,
     loadCalendarWeekPlan,
@@ -782,7 +783,181 @@ function normalizeInternalToolResult(result: ToolResult): ToolResult {
     };
 }
 
+async function executeAvatarTool(call: ToolCall, context?: ToolExecutionContext): Promise<ToolResult> {
+    const capability = getInternalCapability(AVATAR_MANAGEMENT_CAPABILITY_ID);
+    if (!capability || !capability.enabled || capability.mode === "off") {
+        return {
+            name: call.name,
+            success: false,
+            error: "自主头像能力未启用（可在设置/工具箱中开启）",
+            userNotice: "自主头像能力未启用",
+        };
+    }
+
+    const characterId = context?.characterId;
+    if (!characterId) {
+        return {
+            name: call.name,
+            success: false,
+            error: "未定位到当前角色，无法更换头像",
+            userNotice: "未找到当前角色",
+        };
+    }
+
+    if (call.name === "搜索头像图片") {
+        const query = typeof call.args.query === "string" ? call.args.query.trim() : "";
+        if (!query) {
+            return {
+                name: call.name,
+                success: false,
+                error: "请提供搜索关键词，例如：cute cat, anime girl, aesthetic",
+                userNotice: "缺少搜索词",
+            };
+        }
+
+        try {
+            const resp = await fetch("/api/tools/unsplash-search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query }),
+                signal: context?.signal,
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                return {
+                    name: call.name,
+                    success: false,
+                    error: data.error || `搜索接口失败 (${resp.status})`,
+                    userNotice: "搜图失败",
+                };
+            }
+            const photos = Array.isArray(data.photos) ? data.photos : [];
+            if (photos.length === 0) {
+                return {
+                    name: call.name,
+                    success: true,
+                    data: `未找到关于「${query}」的相关图片，建议尝试更简短或英文关键词。`,
+                    userNotice: "未搜到图片",
+                };
+            }
+
+            const formatted = photos.slice(0, 5).map((p: any, i: number) =>
+                `${i + 1}. [${p.description || "候选头像"}] 图片URL: ${p.url}`
+            ).join("\n");
+
+            return {
+                name: call.name,
+                success: true,
+                data: `在 Unsplash 搜索到以下候选头像图片：\n${formatted}\n\n你可以挑选中意的图片，并调用 [执行动作:更换头像({"source":"url","imageUrl":"选中的图片URL"})] 来更换头像。`,
+                userNotice: `已搜索到 ${photos.length} 张候选头像`,
+            };
+        } catch (err) {
+            return {
+                name: call.name,
+                success: false,
+                error: String(err),
+                userNotice: "搜图出错",
+            };
+        }
+    }
+
+    if (call.name === "更换头像") {
+        const source = String(call.args.source || "");
+        let newAvatarUrl = "";
+
+        if (source === "user_recent_photo") {
+            try {
+                const sessionId = context?.sessionId;
+                let userImgUrl = "";
+                if (sessionId) {
+                    const recentMsgs = await chatDb.messages
+                        .where("sessionId")
+                        .equals(sessionId)
+                        .reverse()
+                        .sortBy("createdAt");
+                    const target = recentMsgs.find(m => m.role === "user" && (m.mediaType === "image" || Boolean(m.mediaUrl)));
+                    if (target?.mediaUrl) {
+                        userImgUrl = target.mediaUrl;
+                    }
+                }
+                if (!userImgUrl) {
+                    return {
+                        name: call.name,
+                        success: false,
+                        error: "未找到用户最近在聊天中发送的照片。请确认用户是否在会话中发送过图片。",
+                        userNotice: "未找到用户发的照片",
+                    };
+                }
+                newAvatarUrl = userImgUrl;
+            } catch (err) {
+                return {
+                    name: call.name,
+                    success: false,
+                    error: `读取用户照片失败: ${String(err)}`,
+                    userNotice: "读取照片失败",
+                };
+            }
+        } else if (source === "url" || call.args.imageUrl || call.args.url) {
+            newAvatarUrl = String(call.args.imageUrl || call.args.url || "").trim();
+            if (!newAvatarUrl) {
+                return {
+                    name: call.name,
+                    success: false,
+                    error: "使用 url 来源换头像时，必须提供有效图片 imageUrl",
+                    userNotice: "缺少图片链接",
+                };
+            }
+        } else {
+            return {
+                name: call.name,
+                success: false,
+                error: 'source 参数无效，必须为 "user_recent_photo" 或 "url"',
+                userNotice: "参数无效",
+            };
+        }
+
+        const chars = loadCharacters();
+        const charIndex = chars.findIndex(c => c.id === characterId);
+        if (charIndex === -1) {
+            return {
+                name: call.name,
+                success: false,
+                error: "未找到当前角色数据",
+                userNotice: "角色不存在",
+            };
+        }
+
+        const prevAvatar = chars[charIndex].avatar;
+        chars[charIndex] = {
+            ...chars[charIndex],
+            avatar: newAvatarUrl,
+            updatedAt: new Date().toISOString(),
+        };
+        saveCharacters(chars);
+
+        if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("character_updated", { detail: chars[charIndex] }));
+            window.dispatchEvent(new CustomEvent("avatar_changed", {
+                detail: { characterId, avatar: newAvatarUrl, prevAvatar },
+            }));
+        }
+
+        const reason = typeof call.args.reason === "string" && call.args.reason.trim()
+            ? `（原因：${call.args.reason.trim()}）`
+            : "";
+        return {
+            name: call.name,
+            success: true,
+            data: `头像更换成功！你已换上了新头像${reason}。在后续对话中，你可以自然地跟用户聊聊你的新头像。`,
+            userNotice: "已更换头像",
+        };
+    }
+
+    return { name: call.name, success: false, error: "未知的头像动作" };
+}
+
 async function executeInternalTool(call: ToolCall, context?: ToolExecutionContext): Promise<ToolResult | null> {
+    if (call.name === "更换头像" || call.name === "搜索头像图片") return executeAvatarTool(call, context);
     if (isNoteWallToolName(call.name)) return executeNoteWallTool(call, context);
     if (isMusicControlToolName(call.name)) return executeMusicControlTool(call, context);
     if (isCalendarToolName(call.name)) return executeCalendarTool(call, context);

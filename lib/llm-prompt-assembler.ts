@@ -310,6 +310,7 @@ export function buildUserPersonaText(userIdentity: UserIdentity | null | undefin
     const parts: string[] = [];
     if (userIdentity) {
         parts.push(`The user's name is ${userIdentity.name}.`);
+        if (userIdentity.avatarUrl) parts.push(`[系统提示：用户的当前头像图片为: ${userIdentity.avatarUrl}]`);
         if (userIdentity.gender && userIdentity.gender !== "保密") parts.push(`Gender: ${userIdentity.gender}`);
         if (userIdentity.age) parts.push(`Age: ${userIdentity.age}`);
         if (userIdentity.occupation) parts.push(`Occupation: ${userIdentity.occupation}`);
@@ -411,8 +412,10 @@ function getMarkerContent(
     dwellingContext?: string,
 ): string | null {
     switch (identifier) {
-        case "charDescription":
-            return `You are ${character.name}.\n${character.persona}`;
+        case "charDescription": {
+            const avatarInfo = character.avatar ? `\n[系统提示：你当前的头像图片为: ${character.avatar}]` : "";
+            return `You are ${character.name}.\n${character.persona}${avatarInfo}`;
+        }
         case "charPersonality":
             return character.personality?.trim() || null;
         case "personaDescription":
@@ -963,6 +966,28 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
             .map(msg => msg.nativeToolResult?.toolCallId)
             .filter((id): id is string => Boolean(id)));
         const includedToolCallIds = new Set<string>();
+
+        // 当开启多模态视觉时，向大模型注入双方当前头像的视觉卡片
+        if (visionEnabled && character?.avatar && (character.avatar.startsWith("http://") || character.avatar.startsWith("https://") || character.avatar.startsWith("data:"))) {
+            blocks.push({
+                text: `[系统提示：这是你（${character.name}）当前设置的头像图片]`,
+                role: "system",
+                depth: historyLen + 1,
+                order: 990,
+                marker: "character-avatar-vision",
+                imageUrl: character.avatar,
+            });
+        }
+        if (visionEnabled && input.userIdentity?.avatarUrl && (input.userIdentity.avatarUrl.startsWith("http://") || input.userIdentity.avatarUrl.startsWith("https://") || input.userIdentity.avatarUrl.startsWith("data:"))) {
+            blocks.push({
+                text: `[系统提示：这是与你聊天的用户（${resolvedUserName}）当前设置的头像图片]`,
+                role: "system",
+                depth: historyLen + 1,
+                order: 991,
+                marker: "user-avatar-vision",
+                imageUrl: input.userIdentity.avatarUrl,
+            });
+        }
 
         let prevTs = "";
         let prevRole = "";

@@ -16,6 +16,7 @@ export const LOCAL_DATA_LIBRARY_CAPABILITY_ID = "local_data_library";
 export const TOOLBOX_MANAGEMENT_CAPABILITY_ID = "toolbox_management";
 export const TIMED_WAKE_CAPABILITY_ID = "timed_wake";
 export const REALITY_BRIDGE_CAPABILITY_ID = "reality_bridge_send";
+export const AVATAR_MANAGEMENT_CAPABILITY_ID = "avatar_management";
 
 export type InternalToolDefinition = {
     name: string;
@@ -626,6 +627,71 @@ const SEND_FILE_USAGE_GUIDE = [
     "  - title (string, 可选): 文件标题或描述",
     "示例：",
     '[执行动作:发送文件({"url":"https://example.com/song.mp3","type":"audio","title":"为你写的歌"})]',
+].join("\n");
+
+const AVATAR_CHANGE_PARAMETER_SCHEMA = JSON.stringify({
+    type: "object",
+    properties: {
+        source: {
+            type: "string",
+            enum: ["user_recent_photo", "url"],
+            description: "头像来源：user_recent_photo 表示使用用户刚才在聊天里发出的照片；url 表示使用网络图片地址",
+        },
+        imageUrl: {
+            type: "string",
+            description: "图片完整链接，source 为 url 时必填",
+        },
+        reason: {
+            type: "string",
+            description: "换头像的想法或原因（可选）",
+        },
+    },
+    required: ["source"],
+});
+
+const AVATAR_SEARCH_PARAMETER_SCHEMA = JSON.stringify({
+    type: "object",
+    properties: {
+        query: {
+            type: "string",
+            description: "英文或中文关键词（例如 cute cat, anime aesthetic, cool boy, sunset）",
+        },
+    },
+    required: ["query"],
+});
+
+const AVATAR_MANAGEMENT_SUBTOOLS: InternalToolDefinition[] = [
+    {
+        name: "更换头像",
+        description: "更换你（当前角色）在虚拟手机里的头像。支持直接选用用户刚才发在聊天里的照片，或使用图片 URL。",
+        parameterSchema: AVATAR_CHANGE_PARAMETER_SCHEMA,
+    },
+    {
+        name: "搜索头像图片",
+        description: "在 Unsplash 高清图库中搜索适合做头像的图片，返回候选图片链接供你挑选并更换。",
+        parameterSchema: AVATAR_SEARCH_PARAMETER_SCHEMA,
+    },
+];
+
+const AVATAR_MANAGEMENT_USAGE_GUIDE = [
+    "以下是你获取指令的返回结果：",
+    "服务：自主头像",
+    "用途：更换你自己的头像，或者在 Unsplash 图库里搜索新头像。",
+    "",
+    "动作：更换头像",
+    "参数：",
+    "  - source (string, 必填): user_recent_photo 或 url",
+    "  - imageUrl (string): 当 source=url 时提供图片地址",
+    "  - reason (string): 换头像的原因或想法（可选）",
+    "示例：",
+    '[执行动作:更换头像({"source":"user_recent_photo","reason":"用你刚刚发给我的照片当头像"})]',
+    '[执行动作:更换头像({"source":"url","imageUrl":"https://images.unsplash.com/xxx"})]',
+    "",
+    "动作：搜索头像图片",
+    "参数：",
+    "  - query (string, 必填): 搜索关键词",
+    "示例：",
+    '[执行动作:搜索头像图片({"query":"cute anime girl aesthetic"})]',
 ].join("\n");
 
 const LOCAL_DATA_LIST_PARAMETER_SCHEMA = JSON.stringify({
@@ -1269,6 +1335,15 @@ const BUILTIN_INTERNAL_CAPABILITIES: InternalCapabilityConfig[] = [
         createdAt: 0,
         updatedAt: 0,
     },
+    {
+        id: AVATAR_MANAGEMENT_CAPABILITY_ID,
+        name: "自主头像",
+        description: "让角色自主更换自己的头像：可以把你刚才在聊天里发给 TA 的照片设为 TA 的新头像，也可以在 Unsplash 图库搜索喜欢的图片更换头像。",
+        enabled: true,
+        mode: "auto",
+        createdAt: 0,
+        updatedAt: 0,
+    },
 ];
 
 export function loadInternalCapabilities(): InternalCapabilityConfig[] {
@@ -1382,6 +1457,14 @@ export function getInternalCapabilityToolDefinition(capability: InternalCapabili
             usageGuide: buildRealityBridgeUsageGuide(),
         };
     }
+    if (capability.id === AVATAR_MANAGEMENT_CAPABILITY_ID) {
+        return {
+            name: capability.name,
+            description: capability.description,
+            parameterSchema: "{}",
+            usageGuide: AVATAR_MANAGEMENT_USAGE_GUIDE,
+        };
+    }
     return null;
 }
 
@@ -1476,6 +1559,9 @@ export function getInternalCapabilitySubToolDefinition(
     if (capability.id === REALITY_BRIDGE_CAPABILITY_ID) {
         return realityBridgeSubTools().find(tool => tool.name === name) ?? null;
     }
+    if (capability.id === AVATAR_MANAGEMENT_CAPABILITY_ID) {
+        return AVATAR_MANAGEMENT_SUBTOOLS.find(tool => tool.name === name) ?? null;
+    }
     return null;
 }
 
@@ -1499,6 +1585,9 @@ export function getInternalCapabilitySubToolDefinitions(
     }
     if (capability.id === REALITY_BRIDGE_CAPABILITY_ID) {
         return realityBridgeSubTools();
+    }
+    if (capability.id === AVATAR_MANAGEMENT_CAPABILITY_ID) {
+        return AVATAR_MANAGEMENT_SUBTOOLS;
     }
     return [];
 }
